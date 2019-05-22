@@ -4,23 +4,18 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.linear_model import LinearRegression
 from enum import Enum
-import statsmodels.api as sm
 import numpy as np
-from sklearn.metrics import r2_score
-import seaborn as sns
-import matplotlib.ticker as ticker
 from matplotlib.ticker import FormatStrFormatter
 import matplotlib.dates as mdates
 
 pd.set_option('display.max_columns', None)
 pd.options.display.float_format = '{:.2f}'.format
 
-BENCHMARK_INDEX_SOURCE = {"SPX": "spx_hist_prices.csv"}
 CEF_DATA_SOURCES = {"ADX": ["adx_hist_prices.csv", "adx_hist_navs.csv"],
                     "CII": ["cii_hist_prices.csv", "cii_hist_navs.csv"],
                     "EOS": ["eos_hist_prices.csv", "eos_hist_navs.csv"]}
 
-CEF_TICKER = "ADX"
+CEF_TICKER = "CII"
 
 DATA_FILE_POSTFIX = "_data.csv"
 Z_SCORE_POSTFIX = " Z-score"
@@ -33,13 +28,13 @@ NAV_COL_NAME = "NAV"
 NAV_RETURNS_COL_NAME = RETURN_PREFIX + NAV_COL_NAME
 PREM_DISC_COL_NAME = "Prem/Disc"
 PREM_DISC_ZSCORE_COL_NAME = PREM_DISC_COL_NAME + Z_SCORE_POSTFIX
-RESIDUALS_COL_NAME = "Residual"
+RESIDUALS_COL_NAME = "Res"
 RESIDUAL_ZSCORE_COL_NAME = RESIDUALS_COL_NAME + str(Z_SCORE_POSTFIX)
 ACTION_COL_NAME = "Action"
 PROFIT_DELTA_COL_NAME = "P&L Delta $"
 PROFIT_DELTA_PERC_COL_NAME = "P&L Delta %"
-CUMULATIVE_PROFIT_COL_NAME = "Cumulative P&L $"
-HOLDING_PERIOD_COL_NAME = "Holding Period (days)"
+CUMULATIVE_PROFIT_COL_NAME = "Cum P&L $"
+HOLDING_PERIOD_COL_NAME = "HP (days)"
 X_COL_NAME = "Nav Returns"
 Y_COL_NAME = "Actual Price Returns"
 Y_PREDICTED_COL_NAME = "Predicted Price Returns"
@@ -166,7 +161,6 @@ def calculate_factors(cef, start_date, period):
 		cef = calculate_return(cef, PRICE_COL_NAME, period_start_date, date)
 		cef = calculate_return(cef, NAV_COL_NAME, period_start_date, date)
 		cef = calculate_zscore(cef, PREM_DISC_COL_NAME, period_start_date, date)
-		print("Processing data for " + str(date))
 	return cef
 
 
@@ -177,11 +171,14 @@ def calculate_cef_data(symbol, start_date, calc_period):
 	AVERAGES_CALC_PERIOD, START_DATE etc.
 
 	"""
+	print("Processing data ... Please wait ... for 'Data processing finished!' indication below!")
 	df = read_raw_cef_data(symbol)
 	df = calculate_factors(df, start_date, calc_period).reset_index(drop=True)
 	df = df.loc[df[DATE_COL_NAME] >= start_date].reset_index(drop=True)
 	file_name = symbol.lower() + DATA_FILE_POSTFIX
 	df.to_csv(file_name)
+	print("Data processing finished!")
+
 
 
 def split_train_test_data(cef, split_data_coefficient):
@@ -242,10 +239,15 @@ def read_processed_cef_data(cef_ticker):
 
 def run_trade_simulation(trade_simul_data, zscore_buy_long=-1, zscore_cover_long=0, zscore_sell_short=1,
                          zscore_cover_short=0):
+	"""
+	Running trade simulation on the given time series based on residual z-score.
+	Simulation takes long and short positions. One position at a time.
+	:return: trades DataFrame and time series DataFrame of profits and losses.
+	"""
 	data = trade_simul_data[[DATE_COL_NAME, PRICE_COL_NAME, RESIDUAL_ZSCORE_COL_NAME]]
 	trades = pd.DataFrame(
 		columns=[DATE_COL_NAME, PRICE_COL_NAME, RESIDUAL_ZSCORE_COL_NAME, ACTION_COL_NAME, HOLDING_PERIOD_COL_NAME,
-		         PROFIT_DELTA_COL_NAME, PROFIT_DELTA_PERC_COL_NAME, CUMULATIVE_PROFIT_COL_NAME])
+		         PROFIT_DELTA_COL_NAME, CUMULATIVE_PROFIT_COL_NAME])
 	dates = trade_simul_data[DATE_COL_NAME]
 	continuos_profits = pd.DataFrame(
 		columns=[DATE_COL_NAME, PRICE_COL_NAME, PROFIT_DELTA_COL_NAME, CUMULATIVE_PROFIT_COL_NAME])
@@ -270,7 +272,7 @@ def run_trade_simulation(trade_simul_data, zscore_buy_long=-1, zscore_cover_long
 				action = TradeAction.BUY_LONG
 				trade_row = list(
 					np.concatenate([row.values,
-					                [action, holding_period, realized_profit_delta, realized_profit_delta_perc,
+					                [action, holding_period, realized_profit_delta,
 					                 cum_realized_profit]]))
 				trades = append_row(trades, trade_row)
 				trade_position = TradePosition.LONG
@@ -278,7 +280,7 @@ def run_trade_simulation(trade_simul_data, zscore_buy_long=-1, zscore_cover_long
 				action = TradeAction.SELL_SHORT
 				trade_row = list(
 					np.concatenate([row.values,
-					                [action, holding_period, realized_profit_delta, realized_profit_delta_perc,
+					                [action, holding_period, realized_profit_delta,
 					                 cum_realized_profit]]))
 				trades = append_row(trades, trade_row)
 				trade_position = TradePosition.SHORT
@@ -296,7 +298,7 @@ def run_trade_simulation(trade_simul_data, zscore_buy_long=-1, zscore_cover_long
 					cum_realized_profit += realized_profit_delta
 					trade_row = list(
 						np.concatenate([row.values,
-						                [action, holding_period, realized_profit_delta, realized_profit_delta_perc,
+						                [action, holding_period, realized_profit_delta,
 						                 cum_realized_profit]]))
 					trades = append_row(trades, trade_row)
 					trade_position = TradePosition.NO_POSITION
@@ -309,7 +311,7 @@ def run_trade_simulation(trade_simul_data, zscore_buy_long=-1, zscore_cover_long
 					cum_realized_profit += realized_profit_delta
 					trade_row = list(
 						np.concatenate([row.values,
-						                [action, holding_period, realized_profit_delta, realized_profit_delta_perc,
+						                [action, holding_period, realized_profit_delta,
 						                 cum_realized_profit]]))
 					trades = append_row(trades, trade_row)
 					trade_position = TradePosition.NO_POSITION
@@ -328,8 +330,7 @@ def append_row(trades, trade_row):
 	                        ACTION_COL_NAME: trade_row[3].name,
 	                        HOLDING_PERIOD_COL_NAME: trade_row[4],
 	                        PROFIT_DELTA_COL_NAME: trade_row[5],
-	                        PROFIT_DELTA_PERC_COL_NAME: trade_row[6],
-	                        CUMULATIVE_PROFIT_COL_NAME: trade_row[7]}, ignore_index=True)
+	                        CUMULATIVE_PROFIT_COL_NAME: trade_row[6]}, ignore_index=True)
 	return trades
 
 
@@ -345,41 +346,41 @@ def plot_trade_simuation(trades, continuos_profits):
 		(trades[ACTION_COL_NAME] == TradeAction.SELL_SHORT.name) | (
 				trades[ACTION_COL_NAME] == TradeAction.COVER_LONG.name), [DATE_COL_NAME, PRICE_COL_NAME]]
 	
-	fig, [ax1, ax2, ax3] = plt.subplots(1, 3, figsize=(15, 6))
+	fig, [ax1, ax2, ax3] = plt.subplots(1, 3, figsize=(15, 4))
 	
 	ax1.plot(dates, prices, alpha=0.6)
-	ax1.scatter(buys[DATE_COL_NAME], buys[PRICE_COL_NAME], marker="v", c="g", label="Buy Prices")
-	ax1.scatter(sells[DATE_COL_NAME], sells[PRICE_COL_NAME], marker="^", c="r", label="Sell Prices")
+	ax1.scatter(buys[DATE_COL_NAME], buys[PRICE_COL_NAME], marker="^", c="g", label="Buy Prices")
+	ax1.scatter(sells[DATE_COL_NAME], sells[PRICE_COL_NAME], marker="v", c="r", label="Sell Prices")
 	ax1.xaxis.set_major_formatter(mdates.DateFormatter("%y/%m/%d"))
 	ax1.yaxis.set_major_formatter(FormatStrFormatter("$%.2f"))
 	ax1.set_xlabel("Dates", fontsize=10)
 	ax1.set_ylabel("Prices", fontsize=10)
-	ax1.tick_params(axis='both', which='both', labelsize=8, rotation=45)
+	ax1.tick_params(axis='both', which='both', labelsize=8, rotation=30)
 	ax1.set_title("Trade Simulation", fontsize=12)
-	ax1.legend(loc=4, prop={"size": 6})
+	ax1.legend(loc=4, prop={"size": 8})
 	
 	ax2.bar(dates, profit_deltas)
+	ax2.axhline(y=0, linewidth=1, color='k')
 	ax2.xaxis.set_major_formatter(mdates.DateFormatter("%y/%m/%d"))
 	ax2.yaxis.set_major_formatter(FormatStrFormatter("$%.2f"))
-	ax2.yaxis.set_major_locator(ticker.MultipleLocator(0.02))
+	# ax2.yaxis.set_major_locator(ticker.MultipleLocator(0.02))
 	ax2.set_xlabel("Date", fontsize=10)
 	ax2.set_ylabel("Profit Deltas", fontsize=10)
-	ax2.tick_params(axis='both', which='both', labelsize=8, rotation=45)
+	ax2.tick_params(axis='both', which='both', labelsize=8, rotation=30)
 	ax2.set_title("Profit Daily Changes", fontsize=12)
 	
-	ax3.plot(dates, cum_profit, alpha=0.6)
+	ax3.plot(dates, cum_profit)
+	ax3.axhline(y=0, linewidth=1, color='k')
 	ax3.xaxis.set_major_formatter(mdates.DateFormatter("%y/%m/%d"))
 	ax3.yaxis.set_major_formatter(FormatStrFormatter("$%.2f"))
 	ax3.set_xlabel("Dates", fontsize=10)
 	ax3.set_ylabel("Profit/Loss In $", fontsize=10)
-	ax3.tick_params(axis='both', which='both', labelsize=8, rotation=45)
+	ax3.tick_params(axis='both', which='both', labelsize=8, rotation=30)
 	ax3.set_title("Profit/Loss Dynamics", fontsize=12)
-	ax3.legend(loc=3, prop={"size": 6})
+	ax3.legend(loc=3, prop={"size": 8})
 	
+	plt.subplots_adjust(wspace=0.3)
 	plt.show()
-
-
-# print(buys)
 
 
 def plot_regress_result(regress_data, regress_statistics):
@@ -398,53 +399,56 @@ def plot_regress_result(regress_data, regress_statistics):
 	           "r_sq = {3:.3f}".format(intercept, coef, corr_x_y, r_sq)
 	text_ax2 = "corr_pred_vs_actual = {0:.3f}".format(corr_pred_actual)
 	
-	fig, [[ax1, ax2], [ax3, ax4]] = plt.subplots(2, 2)
+	fig, [[ax1, ax2], [ax3, ax4]] = plt.subplots(2, 2, figsize=(14, 11))
 	
 	ax1.plot(x, y_predicted, label="Predicted Price Returns", c="b")
 	ax1.scatter(x, y_actual, c="y", s=14, label="Actual Pice Returns")
 	ax1.xaxis.set_major_formatter(FormatStrFormatter("%.2f%%"))
 	ax1.yaxis.set_major_formatter(FormatStrFormatter("%.2f%%"))
-	ax1.xaxis.set_major_locator(ticker.MultipleLocator(7))
-	ax1.yaxis.set_major_locator(ticker.MultipleLocator(7))
+	# ax1.xaxis.set_major_locator(ticker.MultipleLocator(7))
+	# ax1.yaxis.set_major_locator(ticker.MultipleLocator(7))
 	ax1.set_xlabel("Nav Returns", fontsize=10)
 	ax1.set_ylabel("Price Returns", fontsize=10)
-	ax1.tick_params(axis='both', which='both', labelsize=8, rotation=45)
-	ax1.text(0.04, 0.78, text_ax1, color="b", ha='left', va='center', transform=ax1.transAxes, fontsize=9)
+	ax1.tick_params(axis='both', which='both', labelsize=8, rotation=30)
+	ax1.text(0.05, 0.85, text_ax1, color="b", ha='left', va='center', transform=ax1.transAxes, fontsize=12)
 	ax1.set_title("Nav-Price Regression Model", fontsize=12)
-	ax1.legend(loc=4, prop={"size": 6})
+	ax1.legend(loc=4, prop={"size": 8})
 	
 	ax2.plot(dates, y_predicted, label="Predicted Price Returns", c="b")
 	ax2.plot(dates, y_actual, label="Actual Pice Returns", c="y")
+	ax2.axhline(y=0, linewidth=1, color='k')
 	ax2.xaxis.set_major_formatter(mdates.DateFormatter("%y/%m/%d"))
 	ax2.yaxis.set_major_formatter(FormatStrFormatter("%.2f%%"))
-	ax2.xaxis.set_major_locator(ticker.MultipleLocator(7))
-	ax2.yaxis.set_major_locator(ticker.MultipleLocator(7))
+	# ax2.xaxis.set_major_locator(ticker.MultipleLocator(7))
+	# ax2.yaxis.set_major_locator(ticker.MultipleLocator(7))
 	ax2.set_xlabel("Date", fontsize=10)
 	ax2.set_ylabel("Price Returns", fontsize=10)
-	ax2.tick_params(axis='both', which='both', labelsize=8, rotation=45)
-	ax2.text(0.22, 0.35, text_ax2, color="b", ha='left', va='center', transform=ax2.transAxes, fontsize=8)
+	ax2.tick_params(axis='both', which='both', labelsize=8, rotation=30)
+	ax2.text(0.05, 0.95, text_ax2, color="b", ha='left', va='center', transform=ax2.transAxes, fontsize=11)
 	ax2.set_title("Predicted vs Actual Price Returns", fontsize=12)
-	ax2.legend(loc=4, prop={"size": 6})
+	ax2.legend(loc=4, prop={"size": 8})
 	
 	ax3.bar(dates, residuals)
+	ax3.axhline(y=0, linewidth=1, color='k')
 	ax3.xaxis.set_major_formatter(mdates.DateFormatter("%y/%m/%d"))
 	ax3.yaxis.set_major_formatter(FormatStrFormatter("%.2f%%"))
-	ax3.xaxis.set_major_locator(ticker.MultipleLocator(7))
-	ax3.yaxis.set_major_locator(ticker.MultipleLocator(2.5))
+	# ax3.xaxis.set_major_locator(ticker.MultipleLocator(7))
+	# ax3.yaxis.set_major_locator(ticker.MultipleLocator(2.5))
 	ax3.set_xlabel("Date", fontsize=10)
 	ax3.set_ylabel("Residuals", fontsize=10)
-	ax3.tick_params(axis='both', which='both', labelsize=8, rotation=45)
-	ax3.set_title("Predicted - Actual\n Price Returns (residuals)", fontsize=12)
+	ax3.tick_params(axis='both', which='both', labelsize=8, rotation=30)
+	ax3.set_title("Predicted - Actual Price Returns (residuals)", fontsize=12)
 	
 	ax4.hist(residuals, bins="fd")
 	ax4.xaxis.set_major_formatter(FormatStrFormatter("%.2f%%"))
-	ax4.xaxis.set_major_locator(ticker.MultipleLocator(2.5))
-	ax4.yaxis.set_major_locator(ticker.MultipleLocator(3))
+	# ax4.xaxis.set_major_locator(ticker.MultipleLocator(2.5))
+	# ax4.yaxis.set_major_locator(ticker.MultipleLocator(3))
 	ax4.set_xlabel("Residuals", fontsize=10)
 	ax4.set_ylabel("Count", fontsize=10)
-	ax4.tick_params(axis='both', which='both', labelsize=8, rotation=45)
+	ax4.tick_params(axis='both', which='both', labelsize=8, rotation=30)
 	ax4.set_title("Residuals  Distribution", fontsize=12)
 	
+	plt.subplots_adjust(hspace=0.25)
 	plt.show()
 
 
@@ -452,15 +456,15 @@ def main():
 	# calculate_cef_data(CEF_TICKER, START_DATE, AVERAGES_CALC_PERIOD)
 	cef = read_processed_cef_data(CEF_TICKER)
 	cef_train_data, cef_test_data = split_train_test_data(cef, TRAIN_DATA_RATIO)
-	
+
 	regress_data, regress_statistics = analyze_regression(cef_train_data, cef_test_data, NAV_RETURNS_COL_NAME,
 	                                                      PRICE_RETURNS_COL_NAME)
 	plot_regress_result(regress_data, regress_statistics)
-	
+
 	cef_simul_data = cef[[DATE_COL_NAME, PRICE_COL_NAME, PRICE_RETURNS_COL_NAME, NAV_RETURNS_COL_NAME]]
 	simulation_start_date = cef_test_data[DATE_COL_NAME].values[0]
 	cef_simul_data = calculate_residual_zscores(cef_simul_data, simulation_start_date, AVERAGES_CALC_PERIOD)
-	
+
 	trades, continuos_profits = run_trade_simulation(cef_simul_data)
 	plot_trade_simuation(trades, continuos_profits)
 
