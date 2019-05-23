@@ -11,14 +11,15 @@ import matplotlib.dates as mdates
 pd.set_option('display.max_columns', None)
 pd.options.display.float_format = '{:.2f}'.format
 
-CEF_DATA_SOURCES = {"ADX": ["adx_hist_prices.csv", "adx_hist_navs.csv"],
-                    "CII": ["cii_hist_prices.csv", "cii_hist_navs.csv"],
-                    "EOS": ["eos_hist_prices.csv", "eos_hist_navs.csv"]}
+CEF_DATA_SOURCES = {"ADX": ["data/adx_hist_prices.csv", "data/adx_hist_navs.csv"],
+                    "CII": ["data/cii_hist_prices.csv", "data/cii_hist_navs.csv"],
+                    "EOS": ["data/eos_hist_prices.csv", "data/eos_hist_navs.csv"]}
 
 DATA_FILE_POSTFIX = "_data.csv"
 Z_SCORE_POSTFIX = " Z-score"
 RETURN_PREFIX = "Return on "
 
+DATA_PATH_PREFIX = "data/"
 DATE_COL_NAME = "Date"
 PRICE_COL_NAME = "Price"
 PRICE_RETURNS_COL_NAME = RETURN_PREFIX + PRICE_COL_NAME
@@ -37,7 +38,7 @@ X_COL_NAME = "Nav Returns"
 Y_COL_NAME = "Actual Price Returns"
 Y_PREDICTED_COL_NAME = "Predicted Price Returns"
 
-CEF_TICKER = "CII"
+CEF_TICKER = "ADX"
 REGRESSOR_COL_NAME = NAV_RETURNS_COL_NAME
 TRAIN_DATA_RATIO = 0.75
 PERIOD_3MONTHS = relativedelta(months=3)
@@ -186,7 +187,8 @@ def calculate_cef_data(symbol, analysis_data_period, calc_period):
 	df = calculate_factors(df, start_date, calc_period).reset_index(drop=True)
 	df = df.loc[df[DATE_COL_NAME] >= start_date].reset_index(drop=True)
 	file_name = symbol.lower() + DATA_FILE_POSTFIX
-	df.to_csv(file_name)
+	path = DATA_PATH_PREFIX + file_name
+	df.to_csv(path)
 	print("Data processing finished!")
 
 
@@ -242,7 +244,8 @@ def read_processed_cef_data(cef_ticker):
 	"""
 	Reading processed Cef data from file as DataFrame.
 	"""
-	cef = pd.read_csv(cef_ticker.lower() + DATA_FILE_POSTFIX, index_col=0)
+	path = DATA_PATH_PREFIX + cef_ticker.lower() + DATA_FILE_POSTFIX
+	cef = pd.read_csv(path, index_col=0)
 	cef[DATE_COL_NAME] = pd.to_datetime(cef[DATE_COL_NAME])
 	cef = cef[[DATE_COL_NAME, PRICE_COL_NAME, PRICE_RETURNS_COL_NAME, NAV_RETURNS_COL_NAME, PREM_DISC_ZSCORE_COL_NAME]]
 	return cef
@@ -459,18 +462,18 @@ def main():
 	# calculate_cef_data(CEF_TICKER, ANALYSIS_DATA_PERIOD, AVERAGES_CALC_PERIOD)
 	cef = read_processed_cef_data(CEF_TICKER)
 	cef_train_data, cef_test_data = split_train_test_data(cef, TRAIN_DATA_RATIO)
-	
+
 	regress_data, regress_statistics = analyze_regression(CEF_TICKER, cef_train_data, cef_test_data, REGRESSOR_COL_NAME,
 	                                                      PRICE_RETURNS_COL_NAME)
 	plot_regress_result(regress_data, regress_statistics)
-	
+
 	simulation_start_date = cef_test_data[DATE_COL_NAME].values[0]
 	cef_simul_data = calculate_trailing_residual_zscores(cef, REGRESSOR_COL_NAME, simulation_start_date,
 	                                                     AVERAGES_CALC_PERIOD)
-	
+
 	trades, continuos_profits = run_residual_trade_simulation(cef_simul_data)
 	plot_trade_simulation(CEF_TICKER, trades, continuos_profits)
-	
+
 	print(trades)
 
 
