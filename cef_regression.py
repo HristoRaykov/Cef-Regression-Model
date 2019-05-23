@@ -15,8 +15,6 @@ CEF_DATA_SOURCES = {"ADX": ["adx_hist_prices.csv", "adx_hist_navs.csv"],
                     "CII": ["cii_hist_prices.csv", "cii_hist_navs.csv"],
                     "EOS": ["eos_hist_prices.csv", "eos_hist_navs.csv"]}
 
-CEF_TICKER = "CII"
-
 DATA_FILE_POSTFIX = "_data.csv"
 Z_SCORE_POSTFIX = " Z-score"
 RETURN_PREFIX = "Return on "
@@ -39,9 +37,15 @@ X_COL_NAME = "Nav Returns"
 Y_COL_NAME = "Actual Price Returns"
 Y_PREDICTED_COL_NAME = "Predicted Price Returns"
 
+CEF_TICKER = "CII"
+REGRESSOR_COL_NAME = NAV_RETURNS_COL_NAME
 TRAIN_DATA_RATIO = 0.75
-AVERAGES_CALC_PERIOD = relativedelta(months=3)
-START_DATE = datetime(2018, 5, 13)
+PERIOD_3MONTHS = relativedelta(months=3)
+PERIOD_6MONTHS = relativedelta(months=6)
+PERIOD_1YEAR = relativedelta(years=1)
+PERIOD_2YEAR = relativedelta(years=2)
+AVERAGES_CALC_PERIOD = PERIOD_3MONTHS
+ANALYSIS_DATA_PERIOD = PERIOD_1YEAR
 
 
 class TradeAction(Enum):
@@ -109,26 +113,28 @@ def find_valid_period_start_date(dates, date, period):
 	"""
 	Select an existing period begin date in ordered list of dates
 	"""
+	
 	period_start_date = date - period
 	period_dates = dates[dates >= period_start_date]
 	first_date = period_dates.iloc[0]
 	return first_date
 
 
-def calculate_residual_zscores(df, simulation_begin_date, calc_period):
+def calculate_trailing_residual_zscores(df_input, regressor_col_name, simulation_begin_date, calc_period):
 	"""
 	Calculating trailing calc_period z-scores for residuals = y - y_predicted
-	from simulation_begin_date to last date in the column.
+	from simulation_begin_date to last date, the regressand is always Price Returns.
 	
 	:return: DataFrame with calculated residual z-score column base on trailing history calc_period
 	"""
+	df = df_input.copy()
 	all_dates = df[DATE_COL_NAME]
-	dates = df.loc[df[DATE_COL_NAME] >= simulation_begin_date, DATE_COL_NAME]
+	dates = df.loc[df[DATE_COL_NAME] >= simulation_begin_date, DATE_COL_NAME].reset_index(drop=True)
 	for date in dates:
 		period_start_date = find_valid_period_start_date(all_dates, date, calc_period)
-		data = df[(df[DATE_COL_NAME] >= period_start_date) & (df[DATE_COL_NAME] <= date)]
-		x = data[PRICE_RETURNS_COL_NAME].values.reshape(-1, 1)
-		y = np.array(data[NAV_RETURNS_COL_NAME].values)
+		data = df[(df[DATE_COL_NAME] >= period_start_date) & (df[DATE_COL_NAME] <= date)].reset_index(drop=True)
+		x = data[regressor_col_name].values.reshape(-1, 1)
+		y = np.array(data[PRICE_RETURNS_COL_NAME].values)
 		
 		regress_model = LinearRegression().fit(x, y)
 		y_predicted = regress_model.predict(x)
@@ -152,10 +158,10 @@ def calculate_factors(cef, start_date, period):
 	:return: DataFrame with calculated factors
 	"""
 	cef = cef[(cef[DATE_COL_NAME] >= start_date - period)]
-	all_dates = cef[DATE_COL_NAME]
+	all_dates = cef[DATE_COL_NAME].reset_index(drop=True)
 	cef[PREM_DISC_COL_NAME] = (cef[PRICE_COL_NAME] - cef[NAV_COL_NAME]) / cef[NAV_COL_NAME] * 100
 	
-	dates = cef.loc[cef[DATE_COL_NAME] >= start_date, DATE_COL_NAME]
+	dates = cef.loc[cef[DATE_COL_NAME] >= start_date, DATE_COL_NAME].reset_index(drop=True)
 	for date in dates:
 		period_start_date = find_valid_period_start_date(all_dates, date, period)
 		cef = calculate_return(cef, PRICE_COL_NAME, period_start_date, date)
@@ -164,7 +170,7 @@ def calculate_factors(cef, start_date, period):
 	return cef
 
 
-def calculate_cef_data(symbol, start_date, calc_period):
+def calculate_cef_data(symbol, analysis_data_period, calc_period):
 	"""
 	Processing raw input Cef data which may take some time. Calculating factors for conducting analysis
 	and saving data to new csv file. This method should be called only if we made changes to TRAIN_DATA_RATIO,
@@ -173,12 +179,15 @@ def calculate_cef_data(symbol, start_date, calc_period):
 	"""
 	print("Processing data ... Please wait ... for 'Data processing finished!' indication below!")
 	df = read_raw_cef_data(symbol)
+	dates = df[DATE_COL_NAME].reset_index(drop=True)
+	end_date = str(dates.values[-1]).split("T")[0]
+	end_date = datetime.strptime(end_date, "%Y-%m-%d")
+	start_date = find_valid_period_start_date(dates, end_date, analysis_data_period)
 	df = calculate_factors(df, start_date, calc_period).reset_index(drop=True)
 	df = df.loc[df[DATE_COL_NAME] >= start_date].reset_index(drop=True)
 	file_name = symbol.lower() + DATA_FILE_POSTFIX
 	df.to_csv(file_name)
 	print("Data processing finished!")
-
 
 
 def split_train_test_data(cef, split_data_coefficient):
@@ -191,7 +200,7 @@ def split_train_test_data(cef, split_data_coefficient):
 	return cef_train_data, cef_test_data
 
 
-def analyze_regression(cef_train_data, cef_test_data, regressor_col_name, regressand_col_name):
+def analyze_regression(cef_ticker, cef_train_data, cef_test_data, regressor_col_name, regressand_col_name):
 	"""
 	Applying regression on train data and test the model on test data.
 	"""
@@ -218,7 +227,9 @@ def analyze_regression(cef_train_data, cef_test_data, regressor_col_name, regres
 	                                       X_COL_NAME: list(regressor_test_data),
 	                                       Y_COL_NAME: regressand_actual_test_data,
 	                                       Y_PREDICTED_COL_NAME: regressand_predicted_test_data})
-	regress_statistics = {"intercept": intercept,
+	regress_statistics = {"cef_ticker": cef_ticker,
+	                      "regressor": regressor_col_name,
+	                      "intercept": intercept,
 	                      "coef": coef,
 	                      "R-square": r_sq_x_y,
 	                      "Corr_x_y": corr_train_data_x_y,
@@ -237,8 +248,8 @@ def read_processed_cef_data(cef_ticker):
 	return cef
 
 
-def run_trade_simulation(trade_simul_data, zscore_buy_long=-1, zscore_cover_long=0, zscore_sell_short=1,
-                         zscore_cover_short=0):
+def run_residual_trade_simulation(trade_simul_data, zscore_buy_long=-1.5, zscore_cover_long=-0.5, zscore_sell_short=1.5,
+                                  zscore_cover_short=0.5):
 	"""
 	Running trade simulation on the given time series based on residual z-score.
 	Simulation takes long and short positions. One position at a time.
@@ -267,7 +278,6 @@ def run_trade_simulation(trade_simul_data, zscore_buy_long=-1, zscore_cover_long
 		if trade_position == TradePosition.NO_POSITION:
 			holding_period = 0
 			realized_profit_delta = 0
-			realized_profit_delta_perc = 0
 			if residual_zscore <= zscore_buy_long:
 				action = TradeAction.BUY_LONG
 				trade_row = list(
@@ -294,7 +304,6 @@ def run_trade_simulation(trade_simul_data, zscore_buy_long=-1, zscore_cover_long
 				if residual_zscore >= zscore_cover_long:
 					action = TradeAction.COVER_LONG
 					realized_profit_delta = curr_price - entry_price
-					realized_profit_delta_perc = realized_profit_delta / entry_price * 100
 					cum_realized_profit += realized_profit_delta
 					trade_row = list(
 						np.concatenate([row.values,
@@ -307,7 +316,6 @@ def run_trade_simulation(trade_simul_data, zscore_buy_long=-1, zscore_cover_long
 				if residual_zscore <= zscore_cover_short:
 					action = TradeAction.COVER_SHORT
 					realized_profit_delta = entry_price - curr_price
-					realized_profit_delta_perc = realized_profit_delta / entry_price * 100
 					cum_realized_profit += realized_profit_delta
 					trade_row = list(
 						np.concatenate([row.values,
@@ -334,11 +342,11 @@ def append_row(trades, trade_row):
 	return trades
 
 
-def plot_trade_simuation(trades, continuos_profits):
-	dates = continuos_profits[DATE_COL_NAME]
-	prices = continuos_profits[PRICE_COL_NAME]
-	profit_deltas = continuos_profits[PROFIT_DELTA_COL_NAME]
-	cum_profit = continuos_profits[CUMULATIVE_PROFIT_COL_NAME]
+def plot_trade_simulation(cef_ticker, trades, continuous_profits):
+	dates = continuous_profits[DATE_COL_NAME]
+	prices = continuous_profits[PRICE_COL_NAME]
+	profit_deltas = continuous_profits[PROFIT_DELTA_COL_NAME]
+	cum_profit = continuous_profits[CUMULATIVE_PROFIT_COL_NAME]
 	buys = trades.loc[
 		(trades[ACTION_COL_NAME] == TradeAction.BUY_LONG.name) | (
 				trades[ACTION_COL_NAME] == TradeAction.COVER_SHORT.name), [DATE_COL_NAME, PRICE_COL_NAME]]
@@ -363,7 +371,6 @@ def plot_trade_simuation(trades, continuos_profits):
 	ax2.axhline(y=0, linewidth=1, color='k')
 	ax2.xaxis.set_major_formatter(mdates.DateFormatter("%y/%m/%d"))
 	ax2.yaxis.set_major_formatter(FormatStrFormatter("$%.2f"))
-	# ax2.yaxis.set_major_locator(ticker.MultipleLocator(0.02))
 	ax2.set_xlabel("Date", fontsize=10)
 	ax2.set_ylabel("Profit Deltas", fontsize=10)
 	ax2.tick_params(axis='both', which='both', labelsize=8, rotation=30)
@@ -379,7 +386,8 @@ def plot_trade_simuation(trades, continuos_profits):
 	ax3.set_title("Profit/Loss Dynamics", fontsize=12)
 	ax3.legend(loc=3, prop={"size": 8})
 	
-	plt.subplots_adjust(wspace=0.3)
+	fig.suptitle(cef_ticker)
+	plt.subplots_adjust(wspace=0.25)
 	plt.show()
 
 
@@ -389,6 +397,8 @@ def plot_regress_result(regress_data, regress_statistics):
 	x = regress_data[X_COL_NAME]
 	y_predicted = regress_data[Y_PREDICTED_COL_NAME]
 	y_actual = regress_data[Y_COL_NAME]
+	cef_ticker = regress_statistics["cef_ticker"]
+	regressor = regress_statistics["regressor"]
 	intercept = regress_statistics["intercept"]
 	coef = regress_statistics["coef"]
 	corr_x_y = regress_statistics["Corr_x_y"]
@@ -399,19 +409,17 @@ def plot_regress_result(regress_data, regress_statistics):
 	           "r_sq = {3:.3f}".format(intercept, coef, corr_x_y, r_sq)
 	text_ax2 = "corr_pred_vs_actual = {0:.3f}".format(corr_pred_actual)
 	
-	fig, [[ax1, ax2], [ax3, ax4]] = plt.subplots(2, 2, figsize=(14, 11))
+	fig, [[ax1, ax2], [ax3, ax4]] = plt.subplots(2, 2, figsize=(13, 10))
 	
 	ax1.plot(x, y_predicted, label="Predicted Price Returns", c="b")
 	ax1.scatter(x, y_actual, c="y", s=14, label="Actual Pice Returns")
 	ax1.xaxis.set_major_formatter(FormatStrFormatter("%.2f%%"))
 	ax1.yaxis.set_major_formatter(FormatStrFormatter("%.2f%%"))
-	# ax1.xaxis.set_major_locator(ticker.MultipleLocator(7))
-	# ax1.yaxis.set_major_locator(ticker.MultipleLocator(7))
-	ax1.set_xlabel("Nav Returns", fontsize=10)
+	ax1.set_xlabel(regressor, fontsize=10)
 	ax1.set_ylabel("Price Returns", fontsize=10)
 	ax1.tick_params(axis='both', which='both', labelsize=8, rotation=30)
 	ax1.text(0.05, 0.85, text_ax1, color="b", ha='left', va='center', transform=ax1.transAxes, fontsize=12)
-	ax1.set_title("Nav-Price Regression Model", fontsize=12)
+	ax1.set_title("{0}-Price Returns Regression Model".format(regressor), fontsize=12)
 	ax1.legend(loc=4, prop={"size": 8})
 	
 	ax2.plot(dates, y_predicted, label="Predicted Price Returns", c="b")
@@ -419,8 +427,6 @@ def plot_regress_result(regress_data, regress_statistics):
 	ax2.axhline(y=0, linewidth=1, color='k')
 	ax2.xaxis.set_major_formatter(mdates.DateFormatter("%y/%m/%d"))
 	ax2.yaxis.set_major_formatter(FormatStrFormatter("%.2f%%"))
-	# ax2.xaxis.set_major_locator(ticker.MultipleLocator(7))
-	# ax2.yaxis.set_major_locator(ticker.MultipleLocator(7))
 	ax2.set_xlabel("Date", fontsize=10)
 	ax2.set_ylabel("Price Returns", fontsize=10)
 	ax2.tick_params(axis='both', which='both', labelsize=8, rotation=30)
@@ -432,8 +438,6 @@ def plot_regress_result(regress_data, regress_statistics):
 	ax3.axhline(y=0, linewidth=1, color='k')
 	ax3.xaxis.set_major_formatter(mdates.DateFormatter("%y/%m/%d"))
 	ax3.yaxis.set_major_formatter(FormatStrFormatter("%.2f%%"))
-	# ax3.xaxis.set_major_locator(ticker.MultipleLocator(7))
-	# ax3.yaxis.set_major_locator(ticker.MultipleLocator(2.5))
 	ax3.set_xlabel("Date", fontsize=10)
 	ax3.set_ylabel("Residuals", fontsize=10)
 	ax3.tick_params(axis='both', which='both', labelsize=8, rotation=30)
@@ -441,32 +445,33 @@ def plot_regress_result(regress_data, regress_statistics):
 	
 	ax4.hist(residuals, bins="fd")
 	ax4.xaxis.set_major_formatter(FormatStrFormatter("%.2f%%"))
-	# ax4.xaxis.set_major_locator(ticker.MultipleLocator(2.5))
-	# ax4.yaxis.set_major_locator(ticker.MultipleLocator(3))
 	ax4.set_xlabel("Residuals", fontsize=10)
 	ax4.set_ylabel("Count", fontsize=10)
 	ax4.tick_params(axis='both', which='both', labelsize=8, rotation=30)
 	ax4.set_title("Residuals  Distribution", fontsize=12)
 	
-	plt.subplots_adjust(hspace=0.25)
+	fig.suptitle(cef_ticker)
+	plt.subplots_adjust(hspace=0.3, top=0.93)
 	plt.show()
 
 
 def main():
-	# calculate_cef_data(CEF_TICKER, START_DATE, AVERAGES_CALC_PERIOD)
+	# calculate_cef_data(CEF_TICKER, ANALYSIS_DATA_PERIOD, AVERAGES_CALC_PERIOD)
 	cef = read_processed_cef_data(CEF_TICKER)
 	cef_train_data, cef_test_data = split_train_test_data(cef, TRAIN_DATA_RATIO)
-
-	regress_data, regress_statistics = analyze_regression(cef_train_data, cef_test_data, NAV_RETURNS_COL_NAME,
+	
+	regress_data, regress_statistics = analyze_regression(CEF_TICKER, cef_train_data, cef_test_data, REGRESSOR_COL_NAME,
 	                                                      PRICE_RETURNS_COL_NAME)
 	plot_regress_result(regress_data, regress_statistics)
-
-	cef_simul_data = cef[[DATE_COL_NAME, PRICE_COL_NAME, PRICE_RETURNS_COL_NAME, NAV_RETURNS_COL_NAME]]
+	
 	simulation_start_date = cef_test_data[DATE_COL_NAME].values[0]
-	cef_simul_data = calculate_residual_zscores(cef_simul_data, simulation_start_date, AVERAGES_CALC_PERIOD)
-
-	trades, continuos_profits = run_trade_simulation(cef_simul_data)
-	plot_trade_simuation(trades, continuos_profits)
+	cef_simul_data = calculate_trailing_residual_zscores(cef, REGRESSOR_COL_NAME, simulation_start_date,
+	                                                     AVERAGES_CALC_PERIOD)
+	
+	trades, continuos_profits = run_residual_trade_simulation(cef_simul_data)
+	plot_trade_simulation(CEF_TICKER, trades, continuos_profits)
+	
+	print(trades)
 
 
 if __name__ == "__main__":
