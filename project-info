@@ -1,8 +1,8 @@
 # Math Concepts for Developers
 ## Final Project 
 
-## Project name: 
-## Project author:
+## Project name: Nav Returns And Premium/Discount As Factors For Analyzing Price Returns Of Closed-End Fund 
+## Project author: Hristo Raykov
 
 ### Terms and conditions:
 * Use Jupyter notebook for text and maths. You can use any programming language you would like.
@@ -22,33 +22,33 @@ Replace the numbers in brackets with your own estimation.
 2. Problem description: 3
 (end of example)
 
-1. Problem statement (0-10)
+1. Problem statement 10
 	* How well is the problem defined?
 	* Does the research address a real-life problem?
 	* Does the research solve the correct problem?
-2. Layout (0-20)
+2. Layout 19
 	* Are the document sections structured properly?
 	* Is the article well-formatted (in terms of readability)?
-3. Code quality (0-20)
+3. Code quality 16
 	* Is the code well-written? Is the code self-documenting?
 	* Is the code organized into functions?
 	* Is the code generally well-structured?
-4. Previous research (0-10)
+4. Previous research 7
 	* Have you cited at least two other sources?
 	* Does the project contain comparisons between the current and the previous results?
-5. Gathering / generating, cleaning, and formatting data (0-10)
+5. Gathering / generating, cleaning, and formatting data 8
 	* Every problem deals with "real-world" data in some way. Even if you don't use datasets, you'll likely generate some data
 	* How is the data gathered?
 	* Is the process statistically valid?
 	* Is the process of data acquisition, data cleaning, and data manipulation well documented?
-6. Testing (0-10)
+6. Testing 10
 	* This can have various meanings: unit testing, hypothesis testing, train/test data set, etc.
 	* Is the code thoroughly tested?
 	* Are there any comparisons to other implementations / other articles / previous research?
-7. Visualization (0-10)
+7. Visualization 9
 	* All kinds of projects employ some visualization: graphical plots, tables, etc.
 	* Are all visualizations correct (i.e. convey the intended meaning without misleading the intended audience)?
 	* Are all visualizations clear, and easy to understand?
-8. Communication (0-10)
+8. Communication 8
 	* Does the project tell the story correctly?
 	* Does the project serve the audience it was intended for? 
